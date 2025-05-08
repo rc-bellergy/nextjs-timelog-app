@@ -2,8 +2,15 @@
 
 import { useState, useEffect } from 'react';
 
+type Task = {
+  id: number;
+  name: string;
+  createdAt: Date;
+};
+
 type TimeEntry = {
   id: number;
+  taskId: number;
   description: string;
   duration: number;
   timestamp: Date;
@@ -14,8 +21,12 @@ export default function Home() {
   const [isRunning, setIsRunning] = useState(false);
   const [description, setDescription] = useState('');
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const [newTaskName, setNewTaskName] = useState('');
+  const [showTaskForm, setShowTaskForm] = useState(false);
 
-  // Load saved entries and timer state from localStorage on component mount
+  // Load saved entries, tasks, and timer state from localStorage on component mount
   useEffect(() => {
     // Load time entries
     const savedEntries = localStorage.getItem('timeEntries');
@@ -33,17 +44,34 @@ export default function Home() {
       }
     }
 
+    // Load tasks
+    const savedTasks = localStorage.getItem('tasks');
+    if (savedTasks) {
+      try {
+        const parsedTasks = JSON.parse(savedTasks);
+        // Convert string timestamps back to Date objects
+        const tasksWithDates = parsedTasks.map((task: any) => ({
+          ...task,
+          createdAt: new Date(task.createdAt)
+        }));
+        setTasks(tasksWithDates);
+      } catch (error) {
+        console.error('Error parsing saved tasks:', error);
+      }
+    }
+
     // Load timer state
     const savedTimerState = localStorage.getItem('timerState');
     if (savedTimerState) {
       try {
-        const { time: savedTime, description: savedDescription, lastUpdated } = JSON.parse(savedTimerState);
+        const { time: savedTime, description: savedDescription, taskId: savedTaskId, lastUpdated } = JSON.parse(savedTimerState);
         
         // Only restore if the timer was saved less than 1 hour ago
         const oneHourAgo = Date.now() - (60 * 60 * 1000);
         if (lastUpdated > oneHourAgo) {
           setTime(savedTime);
           setDescription(savedDescription || '');
+          setSelectedTaskId(savedTaskId);
         } else {
           // Clear outdated timer state
           localStorage.removeItem('timerState');
@@ -59,6 +87,11 @@ export default function Home() {
     localStorage.setItem('timeEntries', JSON.stringify(timeEntries));
   }, [timeEntries]);
 
+  // Save tasks to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('tasks', JSON.stringify(tasks));
+  }, [tasks]);
+
   // Save timer state whenever it changes
   useEffect(() => {
     // Only save if there's time on the timer
@@ -66,13 +99,14 @@ export default function Home() {
       localStorage.setItem('timerState', JSON.stringify({
         time,
         description,
+        taskId: selectedTaskId,
         lastUpdated: Date.now()
       }));
     } else {
       // Clear timer state if timer is reset
       localStorage.removeItem('timerState');
     }
-  }, [time, description]);
+  }, [time, description, selectedTaskId]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
@@ -111,10 +145,41 @@ export default function Home() {
     setTime(0);
   };
 
+  const handleAddTask = () => {
+    if (newTaskName.trim()) {
+      const newTask: Task = {
+        id: Date.now(),
+        name: newTaskName.trim(),
+        createdAt: new Date(),
+      };
+      
+      setTasks([...tasks, newTask]);
+      setNewTaskName('');
+      setShowTaskForm(false);
+      
+      // Auto-select the newly created task
+      setSelectedTaskId(newTask.id);
+    }
+  };
+
+  const handleDeleteTask = (id: number) => {
+    // Remove the task
+    setTasks(tasks.filter(task => task.id !== id));
+    
+    // If the deleted task was selected, clear the selection
+    if (selectedTaskId === id) {
+      setSelectedTaskId(null);
+    }
+    
+    // Remove all time entries associated with this task
+    setTimeEntries(timeEntries.filter(entry => entry.taskId !== id));
+  };
+
   const handleSaveEntry = () => {
     if (time > 0) {
       const newEntry: TimeEntry = {
         id: Date.now(),
+        taskId: selectedTaskId || 0, // Use 0 for entries without a specific task
         description: description || 'Untitled entry',
         duration: time,
         timestamp: new Date(),
@@ -124,6 +189,7 @@ export default function Home() {
       setDescription('');
       setTime(0);
       setIsRunning(false);
+      // Keep the selected task for the next entry
     }
   };
 
@@ -135,17 +201,24 @@ export default function Home() {
     if (timeEntries.length === 0) return;
 
     // Create CSV content
-    const headers = ['Description', 'Duration (HH:MM:SS)', 'Date & Time'];
+    const headers = ['Description', 'Task', 'Duration (HH:MM:SS)', 'Date & Time'];
     const csvRows = [headers.join(',')];
 
     timeEntries.forEach(entry => {
       const formattedDuration = formatTime(entry.duration);
       const formattedTimestamp = entry.timestamp.toLocaleString();
-      // Escape description to handle commas in the text
+      
+      // Find the task associated with this entry
+      const task = tasks.find(t => t.id === entry.taskId);
+      const taskName = task ? task.name : 'No Task';
+      
+      // Escape text fields to handle commas
       const escapedDescription = `"${entry.description.replace(/"/g, '""')}"`;
+      const escapedTaskName = `"${taskName.replace(/"/g, '""')}"`;
       
       csvRows.push([
         escapedDescription,
+        escapedTaskName,
         formattedDuration,
         formattedTimestamp
       ].join(','));
@@ -176,6 +249,63 @@ export default function Home() {
           {formatTime(time)}
         </div>
         
+        {/* Task Selection */}
+        <div className="mb-4">
+          <div className="flex justify-between items-center mb-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Select Task
+            </label>
+            <button
+              onClick={() => setShowTaskForm(!showTaskForm)}
+              className="text-sm text-blue-500 hover:text-blue-700"
+            >
+              {showTaskForm ? 'Cancel' : '+ New Task'}
+            </button>
+          </div>
+          
+          {showTaskForm ? (
+            <div className="flex mb-2">
+              <input
+                type="text"
+                value={newTaskName}
+                onChange={(e) => setNewTaskName(e.target.value)}
+                placeholder="Enter task name"
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-l-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+              />
+              <button
+                onClick={handleAddTask}
+                disabled={!newTaskName.trim()}
+                className={`px-4 py-2 rounded-r-md font-medium text-white ${
+                  !newTaskName.trim() 
+                    ? 'bg-gray-400 cursor-not-allowed' 
+                    : 'bg-blue-500 hover:bg-blue-600'
+                } transition-colors`}
+              >
+                Add
+              </button>
+            </div>
+          ) : (
+            <select
+              value={selectedTaskId || ''}
+              onChange={(e) => setSelectedTaskId(e.target.value ? Number(e.target.value) : null)}
+              className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+            >
+              <option value="">-- No task selected --</option>
+              {tasks.map(task => (
+                <option key={task.id} value={task.id}>
+                  {task.name}
+                </option>
+              ))}
+            </select>
+          )}
+          
+          {tasks.length > 0 && !showTaskForm && (
+            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {tasks.length} task{tasks.length !== 1 ? 's' : ''} available
+            </div>
+          )}
+        </div>
+        
         <div className="mb-6">
           <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             What are you working on?
@@ -185,7 +315,7 @@ export default function Home() {
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Enter task description"
+            placeholder="Enter time entry description"
             className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
           />
         </div>
@@ -222,7 +352,43 @@ export default function Home() {
           </button>
         </div>
         
-        {timeEntries.length > 0 && (
+        {/* Task Management Section */}
+{tasks.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white">Your Tasks</h2>
+            <div className="space-y-2">
+              {tasks.map((task) => (
+                <div 
+                  key={task.id} 
+                  className="p-3 bg-gray-50 dark:bg-gray-700 rounded-md flex justify-between items-center"
+                >
+                  <div className="flex items-center">
+                    <input
+                      type="radio"
+                      id={`task-${task.id}`}
+                      name="selectedTask"
+                      checked={selectedTaskId === task.id}
+                      onChange={() => setSelectedTaskId(task.id)}
+                      className="mr-3 h-4 w-4 text-blue-600"
+                    />
+                    <label htmlFor={`task-${task.id}`} className="font-medium text-gray-800 dark:text-white cursor-pointer">
+                      {task.name}
+                    </label>
+                  </div>
+                  <button 
+                    onClick={() => handleDeleteTask(task.id)}
+                    className="text-red-500 hover:text-red-700"
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+{/* Time Entries Section */}
+{timeEntries.length > 0 && (
           <div>
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold text-gray-800 dark:text-white">Recent Time Entries</h2>
@@ -234,25 +400,40 @@ export default function Home() {
               </button>
             </div>
             <div className="space-y-3">
-              {timeEntries.map((entry) => (
-                <div 
-                  key={entry.id} 
-                  className="p-3 bg-gray-50 dark:bg-gray-700 rounded-md flex justify-between items-center"
-                >
-                  <div>
-                    <p className="font-medium text-gray-800 dark:text-white">{entry.description}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {formatTime(entry.duration)} • {entry.timestamp.toLocaleString()}
-                    </p>
-                  </div>
-                  <button 
-                    onClick={() => handleDeleteEntry(entry.id)}
-                    className="text-red-500 hover:text-red-700"
+              {timeEntries.map((entry) => {
+                // Find the task associated with this entry
+                const task = tasks.find(t => t.id === entry.taskId);
+                
+                return (
+                  <div 
+                    key={entry.id} 
+                    className="p-3 bg-gray-50 dark:bg-gray-700 rounded-md flex justify-between items-center"
                   >
-                    Delete
-                  </button>
-                </div>
-              ))}
+                    <div>
+                      <p className="font-medium text-gray-800 dark:text-white">{entry.description}</p>
+                      <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+                        <span>{formatTime(entry.duration)}</span>
+                        <span className="mx-1">•</span>
+                        {task && (
+                          <>
+                            <span className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 px-2 py-0.5 rounded text-xs">
+                              {task.name}
+                            </span>
+                            <span className="mx-1">•</span>
+                          </>
+                        )}
+                        <span>{entry.timestamp.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => handleDeleteEntry(entry.id)}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
