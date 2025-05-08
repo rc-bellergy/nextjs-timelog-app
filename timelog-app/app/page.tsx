@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 
 type Task = {
   id: number;
@@ -11,7 +12,6 @@ type Task = {
 type TimeEntry = {
   id: number;
   taskId: number;
-  description: string;
   duration: number;
   timestamp: Date;
 };
@@ -19,7 +19,6 @@ type TimeEntry = {
 export default function Home() {
   const [time, setTime] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
-  const [description, setDescription] = useState('');
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
@@ -64,13 +63,12 @@ export default function Home() {
     const savedTimerState = localStorage.getItem('timerState');
     if (savedTimerState) {
       try {
-        const { time: savedTime, description: savedDescription, taskId: savedTaskId, lastUpdated } = JSON.parse(savedTimerState);
+        const { time: savedTime, taskId: savedTaskId, lastUpdated } = JSON.parse(savedTimerState);
         
         // Only restore if the timer was saved less than 1 hour ago
         const oneHourAgo = Date.now() - (60 * 60 * 1000);
         if (lastUpdated > oneHourAgo) {
           setTime(savedTime);
-          setDescription(savedDescription || '');
           setSelectedTaskId(savedTaskId);
         } else {
           // Clear outdated timer state
@@ -98,7 +96,6 @@ export default function Home() {
     if (time > 0) {
       localStorage.setItem('timerState', JSON.stringify({
         time,
-        description,
         taskId: selectedTaskId,
         lastUpdated: Date.now()
       }));
@@ -106,7 +103,7 @@ export default function Home() {
       // Clear timer state if timer is reset
       localStorage.removeItem('timerState');
     }
-  }, [time, description, selectedTaskId]);
+  }, [time, selectedTaskId]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
@@ -176,20 +173,17 @@ export default function Home() {
   };
 
   const handleSaveEntry = () => {
-    if (time > 0) {
+    if (time > 0 && selectedTaskId) {
       const newEntry: TimeEntry = {
         id: Date.now(),
-        taskId: selectedTaskId || 0, // Use 0 for entries without a specific task
-        description: description || 'Untitled entry',
+        taskId: selectedTaskId,
         duration: time,
         timestamp: new Date(),
       };
       
       setTimeEntries([newEntry, ...timeEntries]);
-      setDescription('');
       setTime(0);
       setIsRunning(false);
-      // Keep the selected task for the next entry
     }
   };
 
@@ -243,6 +237,17 @@ export default function Home() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900 p-4">
       <div className="w-full max-w-md p-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+        <div className="flex justify-between mb-6">
+          <h1 className="text-xl font-bold">Time Tracker</h1>
+          <div className="space-x-2">
+            <Link href="/tasks" className="text-sm text-blue-500 hover:text-blue-700">
+              Tasks
+            </Link>
+            <Link href="/entries" className="text-sm text-blue-500 hover:text-blue-700">
+              Entries
+            </Link>
+          </div>
+        </div>
         <h1 className="text-3xl font-bold text-center mb-6 text-gray-800 dark:text-white">Timelog App</h1>
         
         <div className="text-6xl font-mono text-center mb-6 text-gray-800 dark:text-white">
@@ -306,19 +311,7 @@ export default function Home() {
           )}
         </div>
         
-        <div className="mb-6">
-          <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            What are you working on?
-          </label>
-          <input
-            type="text"
-            id="description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Enter time entry description"
-            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-          />
-        </div>
+        
         
         <div className="flex justify-center space-x-4 mb-8">
           <button
@@ -341,9 +334,9 @@ export default function Home() {
           
           <button
             onClick={handleSaveEntry}
-            disabled={time === 0}
+            disabled={time === 0 || !selectedTaskId}
             className={`px-6 py-3 rounded-lg font-medium text-white ${
-              time === 0 
+              time === 0 || !selectedTaskId
                 ? 'bg-gray-400 cursor-not-allowed' 
                 : 'bg-blue-500 hover:bg-blue-600'
             } transition-colors`}
